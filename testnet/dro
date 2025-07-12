@@ -1,0 +1,613 @@
+"""
+Crypto News Trading Bot - Configuration Ready Version
+
+IMPORTANT SETUP NOTES:
+1. For real news data, you need API keys from:
+   - NewsAPI (newsapi.org) - Free tier available
+   - CryptoNews API (cryptonews-api.com) - Paid service
+   - NewsData.io - Free tier available
+
+2. Currently uses mock news data for testing. To use real news:
+   - Get API keys from the services above
+   - Update the get_newsapi_data() and get_cryptonews_api_data() methods
+   - Add your API keys to the configuration section below
+
+3. Required packages:
+   pip install ccxt requests pandas numpy textblob
+"""
+
+import ccxt
+import requests
+import json
+import time
+import pandas as pd
+from datetime import datetime, timedelta
+import numpy as np
+from textblob import TextBlob
+import hashlib
+import hmac
+import base64
+
+# ============================================================================
+# 🔑 CONFIGURATION SECTION - ADD YOUR API KEYS HERE
+# ============================================================================
+
+# Binance API Keys (Required for trading)
+BINANCE_API_KEY = "aead011d255818d35c08a7264bfd0b546c7b0180a7f5de6dd564159ed87d3ed3"  # Add your Binance API key here
+BINANCE_SECRET = "cb65501c6077598079208d5c7a6dc82a7785f53fb743974a337586bfe1e0a6c8"   # Add your Binance secret key here
+
+# News API Keys (Optional - for real news data)
+NEWS_API_KEY = "d29a90d1c51e4afbbf48928d5ba500ab"           # Get from https://newsapi.org/
+CRYPTONEWS_API_KEY = ""     # Get from https://cryptonews-api.com/
+NEWSDATA_API_KEY = "pub_b123ac69969b4d118eb8ad788e231a47"       # Get from https://newsdata.io/
+
+# Trading Configuration
+TRADING_CONFIG = {
+    "test_mode": True,              # True for demo, False for real trading
+    "position_size": 0.01,          # 1% of total balance per trade
+    "max_positions": 3,             # Maximum number of open positions
+    "profit_target": 0.02,          # 2% profit target
+    "stop_loss": 0.01,              # 1% stop loss
+    "symbols": ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'ADA/USDT', 'SOL/USDT'],
+    "analysis_interval": 30         # Seconds between analysis cycles
+}
+
+# ============================================================================
+# 🤖 BOT CLASS IMPLEMENTATION
+# ============================================================================
+
+class CryptoNewsBot:
+    def _init_(self, binance_api_key, binance_secret, config=None):
+        """
+        Bot Trading ak News Analysis
+        
+        Args:
+            binance_api_key (str): Binance API key
+            binance_secret (str): Binance secret key
+            config (dict): Trading configuration
+        """
+        self.api_key = binance_api_key
+        self.secret = binance_secret
+        
+        # Load configuration
+        self.config = config or TRADING_CONFIG
+        self.test_mode = self.config.get('test_mode', True)
+        
+        # Validate API keys
+        if not binance_api_key or not binance_secret:
+            raise ValueError("❌ Binance API key ak secret yo obligatwa!")
+        
+        # Setup Binance connection
+        if self.test_mode:
+            self.exchange = ccxt.binance({
+                'apiKey': binance_api_key,
+                'secret': binance_secret,
+                'sandbox': True,  # Demo mode
+                'enableRateLimit': True,
+            })
+        else:
+            self.exchange = ccxt.binance({
+                'apiKey': binance_api_key,
+                'secret': binance_secret,
+                'enableRateLimit': True,
+            })
+        
+        # Trading parameters
+        self.symbols = self.config.get('symbols', ['BTC/USDT', 'ETH/USDT'])
+        self.position_size = self.config.get('position_size', 0.01)
+        self.max_positions = self.config.get('max_positions', 3)
+        self.profit_target = self.config.get('profit_target', 0.02)
+        self.stop_loss = self.config.get('stop_loss', 0.01)
+        self.analysis_interval = self.config.get('analysis_interval', 30)
+        
+        # News API keys
+        self.news_api_key = NEWS_API_KEY
+        self.cryptonews_api_key = CRYPTONEWS_API_KEY
+        self.newsdata_api_key = NEWSDATA_API_KEY
+        
+        # Current positions
+        self.positions = {}
+        self.last_analysis = {}
+        
+        print(f"🚀 Bot initialized in {'DEMO' if self.test_mode else 'REAL'} mode")
+        print(f"📊 Symbols: {self.symbols}")
+        print(f"💰 Position size: {self.position_size*100}% of balance")
+        
+    def get_crypto_news(self, hours=1):
+        """
+        Jwenn nouvèl crypto yo nan kèk èdtan
+        """
+        news_data = []
+        
+        # Try multiple news sources in order of preference
+        news_sources = [
+            self.get_newsapi_data,
+            self.get_cryptonews_api_data,
+            self.get_newsdata_api_data,
+            self.get_mock_news_data  # Fallback for testing
+        ]
+        
+        for source_func in news_sources:
+            try:
+                source_news = source_func(hours)
+                if source_news:
+                    news_data.extend(source_news)
+                    print(f"📰 {len(source_news)} articles from {source_func._name_}")
+                    break  # Use first successful source
+            except Exception as e:
+                print(f"⚠ Error with {source_func._name_}: {e}")
+                continue
+        
+        if not news_data:
+            print("⚠ No news data available, using mock data")
+            news_data = self.get_mock_news_data(hours)
+        
+        return news_data[:20]  # Limit to 20 articles
+    
+    def get_newsapi_data(self, hours=1):
+        """
+        Get news from NewsAPI
+        Sign up at: https://newsapi.org/
+        """
+        if not self.news_api_key:
+            return None
+        
+        try:
+            from_date = (datetime.now() - timedelta(hours=hours)).strftime('%Y-%m-%d')
+            
+            response = requests.get(
+                'https://newsapi.org/v2/everything',
+                params={
+                    'q': 'bitcoin OR ethereum OR cryptocurrency OR crypto',
+                    'from': from_date,
+                    'sortBy': 'publishedAt',
+                    'language': 'en',
+                    'pageSize': 20
+                },
+                headers={'X-Api-Key': self.news_api_key}
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                news_data = []
+                
+                for article in data.get('articles', []):
+                    news_data.append({
+                        'title': article.get('title', ''),
+                        'description': article.get('description', ''),
+                        'url': article.get('url', ''),
+                        'published': article.get('publishedAt', ''),
+                        'source': article.get('source', {}).get('name', 'NewsAPI')
+                    })
+                
+                return news_data
+                
+        except Exception as e:
+            print(f"❌ Error getting NewsAPI data: {e}")
+        
+        return None
+    
+    def get_cryptonews_api_data(self, hours=1):
+        """
+        Get news from CryptoNews API
+        Sign up at: https://cryptonews-api.com/
+        """
+        if not self.cryptonews_api_key:
+            return None
+        
+        try:
+            # Example implementation - update with actual API endpoints
+            response = requests.get(
+                'https://cryptonews-api.com/api/v1/news',
+                params={
+                    'token': self.cryptonews_api_key,
+                    'hours': hours,
+                    'limit': 20
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                news_data = []
+                
+                for article in data.get('data', []):
+                    news_data.append({
+                        'title': article.get('title', ''),
+                        'description': article.get('text', ''),
+                        'url': article.get('url', ''),
+                        'published': article.get('date', ''),
+                        'source': article.get('source', 'CryptoNews')
+                    })
+                
+                return news_data
+                
+        except Exception as e:
+            print(f"❌ Error getting CryptoNews API data: {e}")
+        
+        return None
+    
+    def get_newsdata_api_data(self, hours=1):
+        """
+        Get news from NewsData.io
+        Sign up at: https://newsdata.io/
+        """
+        if not self.newsdata_api_key:
+            return None
+        
+        try:
+            response = requests.get(
+                'https://newsdata.io/api/1/news',
+                params={
+                    'apikey': self.newsdata_api_key,
+                    'q': 'bitcoin OR ethereum OR cryptocurrency',
+                    'language': 'en',
+                    'category': 'business',
+                    'size': 20
+                }
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                news_data = []
+                
+                for article in data.get('results', []):
+                    news_data.append({
+                        'title': article.get('title', ''),
+                        'description': article.get('description', ''),
+                        'url': article.get('link', ''),
+                        'published': article.get('pubDate', ''),
+                        'source': article.get('source_id', 'NewsData')
+                    })
+                
+                return news_data
+                
+        except Exception as e:
+            print(f"❌ Error getting NewsData API data: {e}")
+        
+        return None
+    
+    def get_mock_news_data(self, hours=1):
+        """
+        Generate mock news data for testing purposes
+        """
+        mock_articles = [
+            {
+                'title': 'Bitcoin Reaches New All-Time High Amid Institutional Adoption',
+                'description': 'Major financial institutions continue to invest in Bitcoin, driving prices to unprecedented levels.',
+                'url': 'https://example.com/bitcoin-ath',
+                'published': datetime.now().isoformat(),
+                'source': 'Mock News'
+            },
+            {
+                'title': 'Ethereum 2.0 Upgrade Shows Promising Results',
+                'description': 'The latest Ethereum upgrade demonstrates improved scalability and reduced gas fees.',
+                'url': 'https://example.com/eth-upgrade',
+                'published': (datetime.now() - timedelta(minutes=30)).isoformat(),
+                'source': 'Mock News'
+            },
+            {
+                'title': 'Regulatory Clarity Boosts Cryptocurrency Market Confidence',
+                'description': 'New regulatory framework provides clear guidelines for cryptocurrency operations.',
+                'url': 'https://example.com/regulation',
+                'published': (datetime.now() - timedelta(hours=1)).isoformat(),
+                'source': 'Mock News'
+            },
+            {
+                'title': 'Solana Network Experiences High Trading Volume',
+                'description': 'Solana blockchain sees increased activity with new DeFi protocols launching.',
+                'url': 'https://example.com/solana-volume',
+                'published': (datetime.now() - timedelta(hours=2)).isoformat(),
+                'source': 'Mock News'
+            },
+            {
+                'title': 'Cardano Smart Contract Development Accelerates',
+                'description': 'New development tools are speeding up smart contract deployment on Cardano.',
+                'url': 'https://example.com/cardano-dev',
+                'published': (datetime.now() - timedelta(hours=3)).isoformat(),
+                'source': 'Mock News'
+            }
+        ]
+        
+        return mock_articles
+    
+    def analyze_news_sentiment(self, news_data):
+        """
+        Analiza sentiment nouvèl yo ak detekte impact
+        """
+        sentiment_scores = {}
+        impact_keywords = {
+            'bullish': ['adoption', 'investment', 'etf', 'institutional', 'surge', 'growth', 'bull', 'rally'],
+            'bearish': ['crash', 'ban', 'regulation', 'hack', 'drop', 'bear', 'decline', 'fall'],
+            'high_impact': ['bitcoin', 'ethereum', 'fed', 'sec', 'treasury', 'blackrock', 'elon', 'musk']
+        }
+        
+        for article in news_data:
+            text = f"{article['title']} {article['description']}"
+            
+            # Sentiment analysis
+            blob = TextBlob(text)
+            sentiment = blob.sentiment.polarity
+            
+            # Impact score
+            impact = 0
+            text_lower = text.lower()
+            
+            for keyword in impact_keywords['high_impact']:
+                if keyword in text_lower:
+                    impact += 2
+            
+            for keyword in impact_keywords['bullish']:
+                if keyword in text_lower:
+                    sentiment += 0.2
+                    impact += 1
+            
+            for keyword in impact_keywords['bearish']:
+                if keyword in text_lower:
+                    sentiment -= 0.2
+                    impact += 1
+            
+            # Store sentiment ak impact
+            for symbol in self.symbols:
+                coin = symbol.split('/')[0].lower()
+                if coin in text_lower:
+                    if coin not in sentiment_scores:
+                        sentiment_scores[coin] = {'sentiment': 0, 'impact': 0, 'count': 0}
+                    
+                    sentiment_scores[coin]['sentiment'] += sentiment
+                    sentiment_scores[coin]['impact'] += impact
+                    sentiment_scores[coin]['count'] += 1
+        
+        # Calculate averages
+        for coin in sentiment_scores:
+            if sentiment_scores[coin]['count'] > 0:
+                sentiment_scores[coin]['sentiment'] /= sentiment_scores[coin]['count']
+                sentiment_scores[coin]['impact'] /= sentiment_scores[coin]['count']
+        
+        return sentiment_scores
+    
+    def get_market_data(self, symbol):
+        """
+        Jwenn done mache yo
+        """
+        try:
+            ticker = self.exchange.fetch_ticker(symbol)
+            ohlcv = self.exchange.fetch_ohlcv(symbol, '1m', limit=100)
+            
+            # Calculate technical indicators
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['sma_20'] = df['close'].rolling(window=20).mean()
+            df['sma_50'] = df['close'].rolling(window=50).mean()
+            df['rsi'] = self.calculate_rsi(df['close'])
+            
+            current_price = ticker['last']
+            sma_20 = df['sma_20'].iloc[-1]
+            sma_50 = df['sma_50'].iloc[-1]
+            rsi = df['rsi'].iloc[-1]
+            
+            return {
+                'price': current_price,
+                'sma_20': sma_20,
+                'sma_50': sma_50,
+                'rsi': rsi,
+                'volume': ticker['quoteVolume'],
+                'change_24h': ticker['percentage']
+            }
+            
+        except Exception as e:
+            print(f"❌ Error getting market data for {symbol}: {e}")
+            return None
+    
+    def calculate_rsi(self, prices, period=14):
+        """
+        Calculate RSI
+        """
+        delta = prices.diff()
+        gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+        loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+        rs = gain / loss
+        rsi = 100 - (100 / (1 + rs))
+        return rsi
+    
+    def should_buy(self, symbol, market_data, sentiment_data):
+        """
+        Detèmine si nou dwe achte
+        """
+        coin = symbol.split('/')[0].lower()
+        
+        # Technical signals
+        tech_score = 0
+        
+        # Price above SMA signals
+        if market_data['price'] > market_data['sma_20']:
+            tech_score += 1
+        if market_data['sma_20'] > market_data['sma_50']:
+            tech_score += 1
+        
+        # RSI signals
+        if 30 <= market_data['rsi'] <= 70:
+            tech_score += 1
+        elif market_data['rsi'] < 30:
+            tech_score += 2  # Oversold
+        
+        # Volume check
+        if market_data['volume'] > 1000000:  # High volume
+            tech_score += 1
+        
+        # Sentiment signals
+        sentiment_score = 0
+        if coin in sentiment_data:
+            if sentiment_data[coin]['sentiment'] > 0.1:
+                sentiment_score += 2
+            if sentiment_data[coin]['impact'] > 1:
+                sentiment_score += 1
+        
+        # Final decision
+        total_score = tech_score + sentiment_score
+        return total_score >= 4
+    
+    def should_sell(self, symbol, entry_price, current_price):
+        """
+        Detèmine si nou dwe vann
+        """
+        profit_pct = (current_price - entry_price) / entry_price
+        
+        # Take profit
+        if profit_pct >= self.profit_target:
+            return True, "PROFIT"
+        
+        # Stop loss
+        if profit_pct <= -self.stop_loss:
+            return True, "STOP_LOSS"
+        
+        return False, "HOLD"
+    
+    def execute_trade(self, symbol, side, amount):
+        """
+        Egzekite kòmès yo
+        """
+        try:
+            if side == 'buy':
+                order = self.exchange.create_market_buy_order(symbol, amount)
+            else:
+                order = self.exchange.create_market_sell_order(symbol, amount)
+            
+            print(f"✅ Trade executed: {side} {amount} {symbol}")
+            print(f"📄 Order ID: {order['id']}")
+            return order
+            
+        except Exception as e:
+            print(f"❌ Error executing trade: {e}")
+            return None
+    
+    def display_status(self):
+        """
+        Display current bot status
+        """
+        print(f"\n{'='*50}")
+        print(f"🤖 Bot Status - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"{'='*50}")
+        print(f"📊 Mode: {'DEMO' if self.test_mode else 'REAL'}")
+        print(f"💰 Open Positions: {len(self.positions)}/{self.max_positions}")
+        
+        if self.positions:
+            print("\n📈 Current Positions:")
+            for symbol, pos in self.positions.items():
+                print(f"   {symbol}: {pos['amount']:.6f} @ {pos['entry_price']:.2f}")
+        
+        try:
+            balance = self.exchange.fetch_balance()
+            print(f"💵 USDT Balance: {balance['USDT']['free']:.2f}")
+        except:
+            print("💵 Balance: Unable to fetch")
+    
+    def run_bot(self):
+        """
+        Fonksyon prensipal bot la
+        """
+        print("🚀 Bot Trading ak News Analysis ap kòmanse...")
+        self.display_status()
+        
+        while True:
+            try:
+                print(f"\n⏰ Analysis cycle at {datetime.now().strftime('%H:%M:%S')}")
+                
+                # Get news
+                news = self.get_crypto_news(hours=1)
+                print(f"📰 {len(news)} articles analyzed")
+                
+                # Analyze sentiment
+                sentiment = self.analyze_news_sentiment(news)
+                if sentiment:
+                    print(f"💭 Sentiment: {sentiment}")
+                
+                # Check each symbol
+                for symbol in self.symbols:
+                    market_data = self.get_market_data(symbol)
+                    if not market_data:
+                        continue
+                    
+                    coin = symbol.split('/')[0].lower()
+                    
+                    # Check existing positions
+                    if symbol in self.positions:
+                        # Check if should sell
+                        should_sell, reason = self.should_sell(
+                            symbol, 
+                            self.positions[symbol]['entry_price'],
+                            market_data['price']
+                        )
+                        
+                        if should_sell:
+                            # Execute sell order
+                            order = self.execute_trade(symbol, 'sell', self.positions[symbol]['amount'])
+                            if order:
+                                profit = (market_data['price'] - self.positions[symbol]['entry_price']) * self.positions[symbol]['amount']
+                                print(f"✅ {symbol} sold - {reason} - Profit: {profit:.2f} USDT")
+                                del self.positions[symbol]
+                    
+                    else:
+                        # Check if should buy
+                        if len(self.positions) < self.max_positions:
+                            if self.should_buy(symbol, market_data, sentiment):
+                                # Calculate position size
+                                try:
+                                    balance = self.exchange.fetch_balance()
+                                    usdt_balance = balance['USDT']['free']
+                                    amount = (usdt_balance * self.position_size) / market_data['price']
+                                    
+                                    if amount > 0:
+                                        order = self.execute_trade(symbol, 'buy', amount)
+                                        if order:
+                                            self.positions[symbol] = {
+                                                'entry_price': market_data['price'],
+                                                'amount': amount,
+                                                'timestamp': datetime.now()
+                                            }
+                                            print(f"🟢 {symbol} bought at {market_data['price']:.2f}")
+                                except Exception as e:
+                                    print(f"❌ Error calculating position size: {e}")
+                
+                # Display current status every 10 cycles
+                if len(self.last_analysis) % 10 == 0:
+                    self.display_status()
+                
+                # Wait before next analysis
+                print(f"⏳ Next analysis in {self.analysis_interval} seconds...")
+                time.sleep(self.analysis_interval)
+                
+            except KeyboardInterrupt:
+                print("\n⛔ Bot stopped by user")
+                self.display_status()
+                break
+            except Exception as e:
+                print(f"❌ Error in main loop: {e}")
+                time.sleep(30)
+
+# ============================================================================
+# 🚀 MAIN EXECUTION
+# ============================================================================
+
+if _name_ == "_main_":
+    print("🔐 Crypto News Trading Bot - Starting...")
+    
+    # Validate API keys
+    if not BINANCE_API_KEY or not BINANCE_SECRET:
+        print("❌ ERREUR: Ou dwe mete Binance API key ak secret nan configuration section an!")
+        print("📝 Ouvè code a ak mete key yo nan BINANCE_API_KEY ak BINANCE_SECRET")
+        print("🔗 Jwenn API keys ou nan: https://www.binance.com/en/my/settings/api-management")
+        exit(1)
+    
+    # Create bot instance
+    try:
+        bot = CryptoNewsBot(
+            binance_api_key=BINANCE_API_KEY,
+            binance_secret=BINANCE_SECRET,
+            config=TRADING_CONFIG
+        )
+        
+        # Run bot
+        bot.run_bot()
+        
+    except Exception as e:
+        print(f"❌ Error starting bot: {e}")
+        print("🔧 Verifye API keys yo ak connection internet ou an")
